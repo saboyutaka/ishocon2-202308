@@ -72,6 +72,10 @@ SQL
     def db_initialize
       db.query('DELETE FROM votes')
     end
+
+    def get_candidates
+      @@candidates ||= db.query('SELECT * FROM candidates')
+    end
   end
 
   get '/' do
@@ -123,12 +127,13 @@ SQL
   end
 
   get '/vote' do
-    candidates = db.query('SELECT * FROM candidates')
+    candidates = get_candidates
     erb :vote, locals: { candidates: candidates, message: '' }
   end
 
   post '/vote' do
-    user = db.xquery('SELECT * FROM users WHERE name = ? AND address = ? AND mynumber = ?',
+    #user = db.xquery('SELECT * FROM users WHERE name = ? AND address = ? AND mynumber = ?',
+    user = db.xquery('SELECT * FROM mynumber = ?',
                      params[:name],
                      params[:address],
                      params[:mynumber]).first
@@ -136,7 +141,7 @@ SQL
     voted_count =
       user.nil? ? 0 : db.xquery('SELECT COUNT(*) AS count FROM votes WHERE user_id = ?', user[:id]).first[:count]
 
-    candidates = db.query('SELECT * FROM candidates')
+    candidates = get_candidates
     if user.nil?
       return erb :vote, locals: { candidates: candidates, message: '個人情報に誤りがあります' }
     elsif user[:votes] < (params[:vote_count].to_i + voted_count)
@@ -160,6 +165,7 @@ SQL
 
   get '/initialize' do
     db_initialize
+    get_candidates
   end
 
   get '/health' do
