@@ -101,25 +101,30 @@ SQL
   end
 
   get '/' do
-    candidates = []
-    election_results.each_with_index do |r, i|
+    candidates = get_candidates
+
+    candidates.each do |candidate|
+      candidate[:count] = redis.get("results.candidates.#{candidate[:id]}").to_i
+    end
+    candidates = candidates.sort_by { |c| c[:count] }.reverse
+
+    candidate_results = []
+    candidates.each_with_index do |r, i|
       # 上位10人と最下位のみ表示
-      candidates.push(r) if i < 10 || 28 < i
+      candidate_results.push(r) if i < 10 || 28 < i
     end
 
-    parties_set = db.query('SELECT political_party FROM candidates GROUP BY political_party')
     parties = {}
-    parties_set.each { |a| parties[a[:political_party]] = 0 }
-    election_results.each do |r|
-      parties[r[:political_party]] += r[:count] || 0
-    end
+    political_parties.each { |party|
+      parties[party] = redis.get("results.party.#{party}").to_i
+    }
 
-    sex_ratio = { '男': 0, '女': 0 }
-    election_results.each do |r|
-      sex_ratio[r[:sex].to_sym] += r[:count] || 0
-    end
+    sex_ratio = {
+      '男': redis.get("results.sex.男").to_i,
+      '女': redis.get("results.sex.女").to_i
+    }
 
-    erb :index, locals: { candidates: candidates,
+    erb :index, locals: { candidates: candidate_results,
                           parties: parties,
                           sex_ratio: sex_ratio }
   end
@@ -198,15 +203,15 @@ SQL
 
     vote_count = params[:vote_count].to_i
 
-    result_candidate = redis.incr("results.candidates.#{candidate[:id]}")
-    result_party = redis.incr("results.party.#{candidate[:political_party]}")
-    result_sex = redis.incr("rresults.sex.#{candidate[:sex]}")
+    result_candidate = redis.get("results.candidates.#{candidate[:id]}").to_i
+    result_party = redis.get("results.party.#{candidate[:political_party]}").to_i
+    result_sex = redis.get("results.sex.#{candidate[:sex]}").to_i
 
     redis.set("users.votes.#{user[:id]}", voted_count + vote_count)
 
     redis.set("results.candidates.#{candidate[:id]}", result_candidate + vote_count)
     redis.set("results.party.#{candidate[:political_party]}", result_party + vote_count)
-    redis.set("rresults.sex.#{candidate[:sex]}", result_sex + vote_count)
+    redis.set("results.sex.#{candidate[:sex]}", result_sex + vote_count)
 
     redis.sadd("keyword.candidates.#{candidate[:id]}", params[:keyword])
     redis.sadd("keyword.party.#{candidate[:political_party]}", params[:keyword])
