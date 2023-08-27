@@ -101,6 +101,8 @@ class Ishocon2::WebApp < Sinatra::Base
       end
       redis.set("results.sex.男", 0)
       redis.set("results.sex.女", 0)
+      redis.keys("users.votes.*").each { |k| redis.del(k) }
+      # redis.keys("users.*").each { |k| redis.del(k) }
     end
   end
 
@@ -170,23 +172,31 @@ class Ishocon2::WebApp < Sinatra::Base
   end
 
   post '/vote' do
-    #user = db.xquery('SELECT * FROM users WHERE name = ? AND address = ? AND mynumber = ?',
-    user = db.xquery('SELECT * FROM users WHERE mynumber = ?', params[:mynumber]).first
+    # user = db.xquery('SELECT * FROM users WHERE mynumber = ?', params[:mynumber]).first
+    mynumber = params[:mynumber]
+    user_hash = redis.get("users.#{mynumber}")
+    user = if user_hash
+      arr = user_hash.split(':')
+      {
+        name: arr[0],
+        address: arr[1],
+        votes: arr[2].to_i
+      }
+    else
+      user = db.xquery('SELECT * FROM users WHERE mynumber = ?', params[:mynumber]).first
+      if user
+        user_hash = [user[:name], user[:address], user[:votes]].join(':')
+        redis.set("users.#{mynumber}", user_hash)
+      end
+      user
+    end
+
     candidates = get_candidates
 
     candidate = candidates.find{ |c| c[:name] == params[:candidate] }
     # candidate = db.xquery('SELECT * FROM candidates WHERE name = ?', params[:candidate]).first
 
-    if user
-      voted_count = redis.get("users.voted_count.#{user[:id]}")
-      if voted_count.nil?
-        redis.set("users.votes.#{user[:id]}", 0)
-        voted_count = 0
-      end
-    else
-      voted_count = 0
-    end
-
+    voted_count = redis.get("users.votes.#{mynumber}").to_i
     # voted_count =
     #   user.nil? ? 0 : db.xquery('SELECT COUNT(*) AS count FROM votes WHERE user_id = ?', user[:id]).first[:count]
 
@@ -218,7 +228,7 @@ class Ishocon2::WebApp < Sinatra::Base
     result_party = redis.get("results.party.#{candidate[:political_party]}").to_i
     result_sex = redis.get("results.sex.#{candidate[:sex]}").to_i
 
-    redis.set("users.votes.#{user[:id]}", voted_count + vote_count)
+    redis.set("users.votes.#{mynumber}", voted_count + vote_count)
 
     redis.set("results.candidates.#{candidate[:id]}", result_candidate + vote_count)
     redis.set("results.party.#{candidate[:political_party]}", result_party + vote_count)
