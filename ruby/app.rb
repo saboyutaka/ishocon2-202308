@@ -2,6 +2,7 @@ require 'sinatra/base'
 require 'mysql2'
 require 'mysql2-cs-bind'
 require 'erubis'
+require 'redis'
 
 module Ishocon2
   class AuthenticationError < StandardError; end
@@ -43,6 +44,10 @@ class Ishocon2::WebApp < Sinatra::Base
       client
     end
 
+    def redis
+      @redis ||= Redis.new(host: ENV['ISHOCON2_REDIS_HOST'] || 'localhost')
+    end
+
     def election_results
       query = <<SQL
 SELECT c.id, c.name, c.political_party, c.sex, v.count
@@ -75,6 +80,19 @@ SQL
 
     def get_candidates
       @@candidates ||= db.query('SELECT * FROM candidates')
+    end
+
+    def political_parties
+      ['夢実現党', '国民10人大活躍党', '国民平和党', '国民元気党']
+    end
+
+    def setup_results
+      get_candidates.each do |candidate|
+        redis.set("results.candidates.#{candidate[:id]}", 0)
+      end
+      political_parties.each do |party|
+        redis.set("results.party.#{party}", 0)
+      end
     end
   end
 
@@ -136,8 +154,19 @@ SQL
     user = db.xquery('SELECT * FROM users WHERE mynumber = ?', params[:mynumber]).first
 
     candidate = db.xquery('SELECT * FROM candidates WHERE name = ?', params[:candidate]).first
-    voted_count =
-      user.nil? ? 0 : db.xquery('SELECT COUNT(*) AS count FROM votes WHERE user_id = ?', user[:id]).first[:count]
+
+    if user
+      voted_count = redis.get("users.voted_count.#{user[:id]}")
+      if voted_count.nil?
+        redis.set("users.votes.#{user[:id]}", 0)
+        voted_count = 0
+      end
+    else
+      voted_count = 0
+    end
+
+    # voted_count =
+    #   user.nil? ? 0 : db.xquery('SELECT COUNT(*) AS count FROM votes WHERE user_id = ?', user[:id]).first[:count]
 
     candidates = get_candidates
     if user.nil?
@@ -161,12 +190,17 @@ SQL
                 candidate[:id],
                 params[:keyword])
     end
+
+    redis.set("users.votes.#{user[:id]}", voted_count + params[:vote_count].to_i)
+
     return erb :vote, locals: { candidates: candidates, message: '投票に成功しました' }
   end
 
   get '/initialize' do
     db_initialize
     get_candidates
+    setup_results
+    nil
   end
 
   get '/health' do
