@@ -48,31 +48,31 @@ class Ishocon2::WebApp < Sinatra::Base
       @redis ||= Redis.new(host: ENV['ISHOCON2_REDIS_HOST'] || 'localhost')
     end
 
-    def election_results
-      query = <<SQL
-SELECT c.id, c.name, c.political_party, c.sex, v.count
-FROM candidates AS c
-LEFT OUTER JOIN
-  (SELECT candidate_id, COUNT(*) AS count
-  FROM votes
-  GROUP BY candidate_id) AS v
-ON c.id = v.candidate_id
-ORDER BY v.count DESC
-SQL
-      db.xquery(query)
-    end
+#     def election_results
+#       query = <<SQL
+# SELECT c.id, c.name, c.political_party, c.sex, v.count
+# FROM candidates AS c
+# LEFT OUTER JOIN
+#   (SELECT candidate_id, COUNT(*) AS count
+#   FROM votes
+#   GROUP BY candidate_id) AS v
+# ON c.id = v.candidate_id
+# ORDER BY v.count DESC
+# SQL
+#       db.xquery(query)
+#     end
 
-    def voice_of_supporter(candidate_ids)
-      query = <<SQL
-SELECT keyword
-FROM votes
-WHERE candidate_id IN (?)
-GROUP BY keyword
-ORDER BY COUNT(*) DESC
-LIMIT 10
-SQL
-      db.xquery(query, candidate_ids).map { |a| a[:keyword] }
-    end
+#     def voice_of_supporter(candidate_ids)
+#       query = <<SQL
+# SELECT keyword
+# FROM votes
+# WHERE candidate_id IN (?)
+# GROUP BY keyword
+# ORDER BY COUNT(*) DESC
+# LIMIT 10
+# SQL
+#       db.xquery(query, candidate_ids).map { |a| a[:keyword] }
+#     end
 
     def db_initialize
       db.query('DELETE FROM votes')
@@ -89,11 +89,11 @@ SQL
     def setup_results
       get_candidates.each do |candidate|
         redis.set("results.candidates.#{candidate[:id]}", 0)
-        redis.del("keyword.candidates.#{candidate[:id]}")
+        redis.keys("keywords.candidates.*").each { |k| redis.del(k) }
       end
       political_parties.each do |party|
         redis.set("results.party.#{party}", 0)
-        redis.del("keyword.party.#{party}")
+        redis.keys("keywords.party.*").each { |k| redis.del(k) }
       end
       redis.set("results.sex.男", 0)
       redis.set("results.sex.女", 0)
@@ -130,23 +130,30 @@ SQL
   end
 
   get '/candidates/:id' do
-    candidate = db.xquery('SELECT * FROM candidates WHERE id = ?', params[:id]).first
+    # candidate = db.xquery('SELECT * FROM candidates WHERE id = ?', params[:id]).first
+    candidate = get_candidates.find { |c| c[:id] == params[:id].to_i }
     return redirect '/' if candidate.nil?
-    votes = db.xquery('SELECT COUNT(*) AS count FROM votes WHERE candidate_id = ?', params[:id]).first[:count]
-    keywords = voice_of_supporter([params[:id]])
+    # votes = db.xquery('SELECT COUNT(*) AS count FROM votes WHERE candidate_id = ?', params[:id]).first[:count]
+    votes = redis.get("results.candidates.#{candidate[:id]}").to_i
+    # keywords = voice_of_supporter([params[:id]])
+    keywords = redis.zrevrange("keywords.candidates.#{candidate[:id]}", 0, 10)
+
     erb :candidate, locals: { candidate: candidate,
                               votes: votes,
                               keywords: keywords }
   end
 
   get '/political_parties/:name' do
-    votes = 0
-    election_results.each do |r|
-      votes += r[:count] || 0 if r[:political_party] == params[:name]
-    end
-    candidates = db.xquery('SELECT * FROM candidates WHERE political_party = ?', params[:name])
+    # votes = 0
+    # election_results.each do |r|
+    #   votes += r[:count] || 0 if r[:political_party] == params[:name]
+    # end
+    votes = redis.get("results.party.#{params[:name]}").to_i
+    # candidates = db.xquery('SELECT * FROM candidates WHERE political_party = ?', params[:name])
+    candidates = get_candidates.select {|c| c[:political_party] == params[:name] }
     candidate_ids = candidates.map { |c| c[:id] }
-    keywords = voice_of_supporter(candidate_ids)
+    # keywords = voice_of_supporter(candidate_ids)
+    keywords = redis.zrevrange("keywords.party.#{params[:name]}", 0, 10)
     erb :political_party, locals: { political_party: params[:name],
                                     votes: votes,
                                     candidates: candidates,
@@ -213,10 +220,8 @@ SQL
     redis.set("results.party.#{candidate[:political_party]}", result_party + vote_count)
     redis.set("results.sex.#{candidate[:sex]}", result_sex + vote_count)
 
-    redis.sadd("keyword.candidates.#{candidate[:id]}", params[:keyword])
-    redis.sadd("keyword.party.#{candidate[:political_party]}", params[:keyword])
-
-    candidate
+    redis.zadd("keywords.candidates.#{candidate[:id]}", redis.zscore("keywords.candidates.#{candidate[:id]}", params[:keyword]).to_i + vote_count, params[:keyword])
+    redis.zadd("keywords.party.#{candidate[:political_party]}", redis.zscore("keywords.party.#{candidate[:political_party]}", params[:keyword]).to_i + vote_count, params[:keyword])
 
     return erb :vote, locals: { candidates: candidates, message: '投票に成功しました' }
   end
