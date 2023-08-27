@@ -90,8 +90,23 @@ class Ishocon2::WebApp < Sinatra::Base
       candidates
     end
 
+    def get_candidate(name)
+      return nil if name.nil?
+      val = redis.get("candidates.#{name}")
+      return nil if val.nil?
+
+      arr = val.split(':')
+      {
+        id: arr[0],
+        name: name,
+        political_party: arr[1],
+        sex: arr[2]
+      }
+    end
+
     def setup_results
       get_candidates.each do |candidate|
+        redis.set("candidates.#{candidate[:name]}", "#{candidate[:id]}:#{candidate[:political_party]}:#{candidate[:sex]}")
         redis.set("results.candidates.#{candidate[:id]}", 0)
         redis.keys("keywords.candidates.*").each { |k| redis.del(k) }
       end
@@ -193,7 +208,11 @@ class Ishocon2::WebApp < Sinatra::Base
 
     candidates = get_candidates
 
-    candidate = candidates.find{ |c| c[:name] == params[:candidate] }
+    candidate = if params[:candidate] && params[:candidate] != ''
+      get_candidate(params[:candidate])
+    else
+      nil
+    end
     # candidate = db.xquery('SELECT * FROM candidates WHERE name = ?', params[:candidate]).first
 
     voted_count = redis.get("users.votes.#{mynumber}").to_i
