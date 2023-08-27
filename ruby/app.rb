@@ -201,12 +201,12 @@ class Ishocon2::WebApp < Sinatra::Base
       return erb :vote, locals: { candidates: candidates, message: '投票理由を記入してください' }
     end
 
-    params[:vote_count].to_i.times do
-      result = db.xquery('INSERT INTO votes (user_id, candidate_id, keyword) VALUES (?, ?, ?)',
-                user[:id],
-                candidate[:id],
-                params[:keyword])
-    end
+    # params[:vote_count].to_i.times do
+    #   result = db.xquery('INSERT INTO votes (user_id, candidate_id, keyword) VALUES (?, ?, ?)',
+    #             user[:id],
+    #             candidate[:id],
+    #             params[:keyword])
+    # end
 
     vote_count = params[:vote_count].to_i
 
