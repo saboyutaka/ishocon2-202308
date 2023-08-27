@@ -1,6 +1,7 @@
 GEM
   remote: https://rubygems.org/
   specs:
+    connection_pool (2.4.1)
     erubis (2.7.0)
     kgio (2.11.4)
     mustermann (3.0.0)
@@ -12,6 +13,10 @@ GEM
     rack-protection (3.1.0)
       rack (~> 2.2, >= 2.2.4)
     raindrops (0.20.1)
+    redis (5.0.7)
+      redis-client (>= 0.9.0)
+    redis-client (0.16.0)
+      connection_pool
     ruby2_keywords (0.0.5)
     sinatra (3.1.0)
       mustermann (~> 3.0)
@@ -30,6 +35,7 @@ DEPENDENCIES
   erubis
   mysql2
   mysql2-cs-bind
+  redis
   sinatra
   unicorn
 
