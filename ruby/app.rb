@@ -133,16 +133,17 @@ SQL
 
   post '/vote' do
     #user = db.xquery('SELECT * FROM users WHERE name = ? AND address = ? AND mynumber = ?',
-    user = db.xquery('SELECT * FROM mynumber = ?',
-                     params[:name],
-                     params[:address],
-                     params[:mynumber]).first
+    user = db.xquery('SELECT * FROM users WHERE mynumber = ?', params[:mynumber]).first
+
     candidate = db.xquery('SELECT * FROM candidates WHERE name = ?', params[:candidate]).first
     voted_count =
       user.nil? ? 0 : db.xquery('SELECT COUNT(*) AS count FROM votes WHERE user_id = ?', user[:id]).first[:count]
 
     candidates = get_candidates
     if user.nil?
+      return erb :vote, locals: { candidates: candidates, message: '個人情報に誤りがあります' }
+    # mynumberと名前とアドレスの一致を確認
+    elsif user[:name] != params[:name] || user[:address] != params[:address]
       return erb :vote, locals: { candidates: candidates, message: '個人情報に誤りがあります' }
     elsif user[:votes] < (params[:vote_count].to_i + voted_count)
       return erb :vote, locals: { candidates: candidates, message: '投票数が上限を超えています' }
