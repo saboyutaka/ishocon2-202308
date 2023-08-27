@@ -89,10 +89,14 @@ SQL
     def setup_results
       get_candidates.each do |candidate|
         redis.set("results.candidates.#{candidate[:id]}", 0)
+        redis.del("keyword.candidates.#{candidate[:id]}")
       end
       political_parties.each do |party|
         redis.set("results.party.#{party}", 0)
+        redis.del("keyword.party.#{party}")
       end
+      redis.set("results.sex.男", 0)
+      redis.set("results.sex.女", 0)
     end
   end
 
@@ -152,8 +156,10 @@ SQL
   post '/vote' do
     #user = db.xquery('SELECT * FROM users WHERE name = ? AND address = ? AND mynumber = ?',
     user = db.xquery('SELECT * FROM users WHERE mynumber = ?', params[:mynumber]).first
+    candidates = get_candidates
 
-    candidate = db.xquery('SELECT * FROM candidates WHERE name = ?', params[:candidate]).first
+    candidate = candidates.find{ |c| c[:name] == params[:candidate] }
+    # candidate = db.xquery('SELECT * FROM candidates WHERE name = ?', params[:candidate]).first
 
     if user
       voted_count = redis.get("users.voted_count.#{user[:id]}")
@@ -168,7 +174,6 @@ SQL
     # voted_count =
     #   user.nil? ? 0 : db.xquery('SELECT COUNT(*) AS count FROM votes WHERE user_id = ?', user[:id]).first[:count]
 
-    candidates = get_candidates
     if user.nil?
       return erb :vote, locals: { candidates: candidates, message: '個人情報に誤りがあります' }
     # mynumberと名前とアドレスの一致を確認
@@ -191,7 +196,22 @@ SQL
                 params[:keyword])
     end
 
-    redis.set("users.votes.#{user[:id]}", voted_count + params[:vote_count].to_i)
+    vote_count = params[:vote_count].to_i
+
+    result_candidate = redis.incr("results.candidates.#{candidate[:id]}")
+    result_party = redis.incr("results.party.#{candidate[:political_party]}")
+    result_sex = redis.incr("rresults.sex.#{candidate[:sex]}")
+
+    redis.set("users.votes.#{user[:id]}", voted_count + vote_count)
+
+    redis.set("results.candidates.#{candidate[:id]}", result_candidate + vote_count)
+    redis.set("results.party.#{candidate[:political_party]}", result_party + vote_count)
+    redis.set("rresults.sex.#{candidate[:sex]}", result_sex + vote_count)
+
+    redis.sadd("keyword.candidates.#{candidate[:id]}", params[:keyword])
+    redis.sadd("keyword.party.#{candidate[:political_party]}", params[:keyword])
+
+    candidate
 
     return erb :vote, locals: { candidates: candidates, message: '投票に成功しました' }
   end
