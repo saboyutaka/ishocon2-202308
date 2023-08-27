@@ -16,6 +16,8 @@ class Ishocon2::WebApp < Sinatra::Base
   set :public_folder, File.expand_path('../public', __FILE__)
   set :protection, true
 
+  PARTY = ['夢実現党', '国民10人大活躍党', '国民平和党', '国民元気党']
+
   helpers do
     def config
       @config ||= {
@@ -45,7 +47,10 @@ class Ishocon2::WebApp < Sinatra::Base
     end
 
     def redis
-      @redis ||= Redis.new(host: ENV['ISHOCON2_REDIS_HOST'] || 'localhost')
+      return Thread.current[:ishocon2_redis] if Thread.current[:ishocon2_redis]
+      client = Redis.new(host: ENV['ISHOCON2_REDIS_HOST'] || 'localhost')
+      Thread.current[:ishocon2_redis] = client
+      client
     end
 
 #     def election_results
@@ -79,11 +84,10 @@ class Ishocon2::WebApp < Sinatra::Base
     end
 
     def get_candidates
-      @@candidates ||= db.query('SELECT * FROM candidates')
-    end
-
-    def political_parties
-      ['夢実現党', '国民10人大活躍党', '国民平和党', '国民元気党']
+      return Thread.current[:ishocon2_candidates] if Thread.current[:ishocon2_candidates]
+      candidates = db.query('SELECT * FROM candidates')
+      Thread.current[:ishocon2_candidates] = candidates
+      candidates
     end
 
     def setup_results
@@ -91,7 +95,7 @@ class Ishocon2::WebApp < Sinatra::Base
         redis.set("results.candidates.#{candidate[:id]}", 0)
         redis.keys("keywords.candidates.*").each { |k| redis.del(k) }
       end
-      political_parties.each do |party|
+      PARTY.each do |party|
         redis.set("results.party.#{party}", 0)
         redis.keys("keywords.party.*").each { |k| redis.del(k) }
       end
@@ -115,7 +119,7 @@ class Ishocon2::WebApp < Sinatra::Base
     end
 
     parties = {}
-    political_parties.each { |party|
+    PARTY.each { |party|
       parties[party] = redis.get("results.party.#{party}").to_i
     }
 
