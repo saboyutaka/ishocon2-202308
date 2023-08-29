@@ -124,8 +124,11 @@ class Ishocon2::WebApp < Sinatra::Base
   get '/' do
     candidates = get_candidates
 
-    candidates.each do |candidate|
-      candidate[:count] = redis.get("results.candidates.#{candidate[:id]}").to_i
+    candidates_ids = candidates.map {|c| c[:id] }
+    results_keys = candidates_ids.map {|id| "results.candidates.#{id}" }
+    results = redis.mget(results_keys)
+    candidates.each_with_index do |candidate, i|
+      candidate[:count] = results[i].to_i
     end
     candidates = candidates.sort_by { |c| c[:count] }.reverse
 
@@ -136,9 +139,9 @@ class Ishocon2::WebApp < Sinatra::Base
     end
 
     parties = {}
-    PARTY.each { |party|
-      parties[party] = redis.get("results.party.#{party}").to_i
-    }
+    party_results_keys = PARTY.map { |party| "results.party.#{party}" }
+    party_results = redis.mget(party_results_keys)
+    PARTY.each_with_index { |party, i| parties[party] = party_results[i].to_i }
 
     sex_ratio = {
       '男': redis.get("results.sex.男").to_i,
@@ -189,6 +192,8 @@ class Ishocon2::WebApp < Sinatra::Base
   post '/vote' do
     # user = db.xquery('SELECT * FROM users WHERE mynumber = ?', params[:mynumber]).first
     mynumber = params[:mynumber]
+    vote_count = params[:vote_count].to_i
+
     user_hash = redis.get("users.#{mynumber}")
     user = if user_hash
       arr = user_hash.split(':')
@@ -224,7 +229,7 @@ class Ishocon2::WebApp < Sinatra::Base
     # mynumberと名前とアドレスの一致を確認
     elsif user[:name] != params[:name] || user[:address] != params[:address]
       return erb :vote, locals: { candidates: candidates, message: '個人情報に誤りがあります' }
-    elsif user[:votes] < (params[:vote_count].to_i + voted_count)
+    elsif user[:votes] < (vote_count + voted_count)
       return erb :vote, locals: { candidates: candidates, message: '投票数が上限を超えています' }
     elsif params[:candidate].nil? || params[:candidate] == ''
       return erb :vote, locals: { candidates: candidates, message: '候補者を記入してください' }
@@ -234,27 +239,12 @@ class Ishocon2::WebApp < Sinatra::Base
       return erb :vote, locals: { candidates: candidates, message: '投票理由を記入してください' }
     end
 
-    # params[:vote_count].to_i.times do
-    #   result = db.xquery('INSERT INTO votes (user_id, candidate_id, keyword) VALUES (?, ?, ?)',
-    #             user[:id],
-    #             candidate[:id],
-    #             params[:keyword])
-    # end
-
-    vote_count = params[:vote_count].to_i
-
-    result_candidate = redis.get("results.candidates.#{candidate[:id]}").to_i
-    result_party = redis.get("results.party.#{candidate[:political_party]}").to_i
-    result_sex = redis.get("results.sex.#{candidate[:sex]}").to_i
-
-    redis.set("users.votes.#{mynumber}", voted_count + vote_count)
-
-    redis.set("results.candidates.#{candidate[:id]}", result_candidate + vote_count)
-    redis.set("results.party.#{candidate[:political_party]}", result_party + vote_count)
-    redis.set("results.sex.#{candidate[:sex]}", result_sex + vote_count)
-
-    redis.zadd("keywords.candidates.#{candidate[:id]}", redis.zscore("keywords.candidates.#{candidate[:id]}", params[:keyword]).to_i + vote_count, params[:keyword])
-    redis.zadd("keywords.party.#{candidate[:political_party]}", redis.zscore("keywords.party.#{candidate[:political_party]}", params[:keyword]).to_i + vote_count, params[:keyword])
+    redis.incrby("users.votes.#{mynumber}", vote_count)
+    redis.incrby("results.candidates.#{candidate[:id]}", vote_count)
+    redis.incrby("results.party.#{candidate[:political_party]}", vote_count)
+    redis.incrby("results.sex.#{candidate[:sex]}", vote_count)
+    redis.zincrby("keywords.candidates.#{candidate[:id]}", vote_count, params[:keyword])
+    redis.zincrby("keywords.party.#{candidate[:political_party]}", vote_count, params[:keyword])
 
     return erb :vote, locals: { candidates: candidates, message: '投票に成功しました' }
   end
