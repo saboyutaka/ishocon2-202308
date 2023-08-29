@@ -32,7 +32,7 @@ class Ishocon2::WebApp < Sinatra::Base
     end
 
     def db
-      return Thread.current[:ishocon2_db] if Thread.current[:ishocon2_db]
+      return $client if $client
       client = Mysql2::Client.new(
         host: config[:db][:host],
         port: config[:db][:port],
@@ -42,15 +42,12 @@ class Ishocon2::WebApp < Sinatra::Base
         reconnect: true
       )
       client.query_options.merge!(symbolize_keys: true)
-      Thread.current[:ishocon2_db] = client
-      client
+      $client = client
     end
 
     def redis
-      return Thread.current[:ishocon2_redis] if Thread.current[:ishocon2_redis]
-      client = Redis.new(host: ENV['ISHOCON2_REDIS_HOST'] || 'localhost')
-      Thread.current[:ishocon2_redis] = client
-      client
+      return $redis if $redis
+      $redis = Redis.new(host: ENV['ISHOCON2_REDIS_HOST'] || 'localhost')
     end
 
     def db_initialize
@@ -58,10 +55,8 @@ class Ishocon2::WebApp < Sinatra::Base
     end
 
     def get_candidates
-      return Thread.current[:ishocon2_candidates] if Thread.current[:ishocon2_candidates]
-      candidates = db.query('SELECT * FROM candidates')
-      Thread.current[:ishocon2_candidates] = candidates
-      candidates
+      return $candidates if $candidates
+      $candidates = db.query('SELECT * FROM candidates')
     end
 
     def get_candidate(name)
@@ -175,8 +170,6 @@ class Ishocon2::WebApp < Sinatra::Base
       user
     end
 
-    candidates = get_candidates
-
     candidate = if params[:candidate] && params[:candidate] != ''
       get_candidate(params[:candidate])
     else
@@ -185,19 +178,29 @@ class Ishocon2::WebApp < Sinatra::Base
 
     voted_count = redis.get("users.votes.#{mynumber}").to_i
 
+    if $template_cached.nil?
+      candidates = get_candidates
+      $invalid_user ||= erb :vote, locals: { candidates: candidates, message: '個人情報に誤りがあります' }
+      $invalid_vote_count ||= erb :vote, locals: { candidates: candidates, message: '投票数が上限を超えています' }
+      $invalid_candidate_blank ||= erb :vote, locals: { candidates: candidates, message: '候補者を記入してください' }
+      $invalid_candidate ||= erb :vote, locals: { candidates: candidates, message: '候補者を正しく記入してください' }
+      $invalid_keyword ||= erb :vote, locals: { candidates: candidates, message: '投票理由を記入してください' }
+      $vote_success ||= erb :vote, locals: { candidates: candidates, message: '投票に成功しました' }
+    end
+
     if user.nil?
-      return erb :vote, locals: { candidates: candidates, message: '個人情報に誤りがあります' }
+      return $invalid_user
     # mynumberと名前とアドレスの一致を確認
     elsif user[:name] != params[:name] || user[:address] != params[:address]
-      return erb :vote, locals: { candidates: candidates, message: '個人情報に誤りがあります' }
+      return $invalid_user
     elsif user[:votes] < (vote_count + voted_count)
-      return erb :vote, locals: { candidates: candidates, message: '投票数が上限を超えています' }
+      return $invalid_vote_count
     elsif params[:candidate].nil? || params[:candidate] == ''
-      return erb :vote, locals: { candidates: candidates, message: '候補者を記入してください' }
+      return $invalid_candidate_blank
     elsif candidate.nil?
-      return erb :vote, locals: { candidates: candidates, message: '候補者を正しく記入してください' }
+      return $invalid_candidate
     elsif params[:keyword].nil? || params[:keyword] == ''
-      return erb :vote, locals: { candidates: candidates, message: '投票理由を記入してください' }
+      return $invalid_keyword
     end
 
     redis.incrby("users.votes.#{mynumber}", vote_count)
@@ -207,7 +210,7 @@ class Ishocon2::WebApp < Sinatra::Base
     redis.zincrby("keywords.candidates.#{candidate[:id]}", vote_count, params[:keyword])
     redis.zincrby("keywords.party.#{candidate[:political_party]}", vote_count, params[:keyword])
 
-    return erb :vote, locals: { candidates: candidates, message: '投票に成功しました' }
+    return $vote_success
   end
 
   get '/initialize' do
